@@ -1,0 +1,164 @@
+// Prisma schema for DIY Assembly AR Helper
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector", schema: "public")]
+}
+
+// User model
+model User {
+  id                String    @id @default(cuid())
+  email             String?   @unique
+  clerkId           String    @unique
+  name              String?
+  role              Role      @default(USER)
+  permissions       Json?     // ABAC permissions
+  stripeCustomerId  String?   @unique
+  subscriptionTier  String?   @default("free")
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sessions          Session[]
+  manuals           Manual[]
+
+  @@index([clerkId])
+  @@index([email])
+  @@map("users")
+}
+
+enum Role {
+  USER
+  PRO
+  MANUFACTURER
+  ADMIN
+}
+
+// Manual model - represents repair/assembly manuals
+model Manual {
+  id                String   @id @default(cuid())
+  userId            String
+  brand             String
+  model             String
+  category          String?
+  title             String
+  description       String?
+  steps             Json     // Array of step objects
+  partsRequired     Json?    // Array of parts needed
+  toolsRequired     Json?    // Array of tools needed
+  estimatedTime     Int?     // Minutes
+  difficultyLevel   String?  // easy, medium, hard
+  isPublic          Boolean  @default(false)
+  isPro             Boolean  @default(false) // Requires Pro subscription
+  imageUrls         Json?    // Array of image URLs from R2
+  encryptedBlobs    Json?    // Encrypted sensitive data (ciphertext only)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessions          Session[]
+
+  @@index([userId])
+  @@index([brand, model])
+  @@index([category])
+  @@index([isPublic])
+  @@map("manuals")
+}
+
+// Session model - tracks user progress through a manual
+model Session {
+  id                String   @id @default(cuid())
+  userId            String
+  manualId          String
+  currentStep       Int      @default(0)
+  stepStates        Json     // Array of step completion states
+  completedSteps    Int      @default(0)
+  totalSteps        Int
+  status            SessionStatus @default(IN_PROGRESS)
+  startedAt         DateTime @default(now())
+  completedAt       DateTime?
+  lastAccessedAt    DateTime @default(now())
+  deviceType        String?  // ios, web
+  arData            Json?    // AR-specific session data
+  telemetry         Json?    // Anonymized telemetry
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  manual            Manual   @relation(fields: [manualId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([manualId])
+  @@index([status])
+  @@map("sessions")
+}
+
+enum SessionStatus {
+  IN_PROGRESS
+  COMPLETED
+  PAUSED
+  ABANDONED
+}
+
+// Subscription model - tracks user subscriptions
+model Subscription {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  stripeSubscriptionId String? @unique
+  applePurchaseId   String?  @unique
+  tier              String   // free, pro, manufacturer
+  status            String   // active, cancelled, past_due
+  currentPeriodEnd  DateTime?
+  cancelAtPeriodEnd Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+// Data Subject Rights - for GDPR/privacy compliance
+model DataExportRequest {
+  id                String   @id @default(cuid())
+  userId            String
+  requestedAt       DateTime @default(now())
+  completedAt       DateTime?
+  status            String   // pending, completed, failed
+  exportUrl         String?
+  expiresAt         DateTime?
+
+  @@index([userId])
+  @@index([status])
+  @@map("data_export_requests")
+}
+
+model DataDeletionRequest {
+  id                String   @id @default(cuid())
+  userId            String
+  requestedAt       DateTime @default(now())
+  scheduledFor      DateTime
+  completedAt       DateTime?
+  status            String   // pending, scheduled, completed
+
+  @@index([userId])
+  @@index([status])
+  @@map("data_deletion_requests")
+}
+
+// Part Detection Cache - for AR part detection
+model PartDetectionCache {
+  id                String   @id @default(cuid())
+  partName          String
+  partHash          String   @unique // Hash of part characteristics
+  boundingBoxData   Json     // 3D bounding box info
+  confidenceScore   Float
+  createdAt         DateTime @default(now())
+
+  @@index([partName])
+  @@index([partHash])
+  @@map("part_detection_cache")
+}
