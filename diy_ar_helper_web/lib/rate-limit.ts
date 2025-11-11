@@ -46,17 +46,30 @@ export const expensiveRatelimit = redis
  */
 const inMemoryStore = new Map<string, { count: number; resetAt: number }>();
 
+// Cleanup old entries every 5 minutes to prevent memory leaks
+if (typeof setInterval !== "undefined") {
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, value] of inMemoryStore.entries()) {
+      if (value.resetAt < now) {
+        inMemoryStore.delete(key);
+      }
+    }
+  }, 5 * 60 * 1000);
+}
+
 export async function checkRateLimit(
   identifier: string,
   limit = 10,
   window = 10000
-): Promise<{ success: boolean; remaining: number }> {
+): Promise<{ success: boolean; remaining: number; reset?: number }> {
   // Use Upstash if available
   if (ratelimit) {
     const result = await ratelimit.limit(identifier);
     return {
       success: result.success,
       remaining: result.remaining,
+      reset: result.reset,
     };
   }
 
@@ -66,16 +79,21 @@ export async function checkRateLimit(
   const existing = inMemoryStore.get(key);
 
   if (!existing || existing.resetAt < now) {
-    inMemoryStore.set(key, { count: 1, resetAt: now + window });
-    return { success: true, remaining: limit - 1 };
+    const resetAt = now + window;
+    inMemoryStore.set(key, { count: 1, resetAt });
+    return { success: true, remaining: limit - 1, reset: resetAt };
   }
 
   if (existing.count >= limit) {
-    return { success: false, remaining: 0 };
+    return { success: false, remaining: 0, reset: existing.resetAt };
   }
 
   existing.count++;
-  return { success: true, remaining: limit - existing.count };
+  return {
+    success: true,
+    remaining: limit - existing.count,
+    reset: existing.resetAt,
+  };
 }
 
 /**
@@ -94,11 +112,23 @@ export function getRateLimitIdentifier(
   // Use API key if provided (for manufacturer integrations)
   const apiKey = req.headers.get("x-api-key");
   if (apiKey) {
-    return `api-key:${apiKey}`;
+    // Sanitize API key to prevent injection attacks
+    const sanitizedKey = apiKey.slice(0, 32).replace(/[^a-zA-Z0-9_-]/g, "");
+    return `api-key:${sanitizedKey}`;
   }
 
   // Fall back to IP address
   const forwardedFor = req.headers.get("x-forwarded-for");
-  const ip = forwardedFor?.split(",")[0] || "unknown";
-  return `ip:${ip}`;
+  const realIp = req.headers.get("x-real-ip");
+
+  // Prefer x-real-ip, then first IP from x-forwarded-for
+  let ip = realIp || (forwardedFor?.split(",")[0]?.trim());
+
+  // Sanitize IP address
+  if (ip) {
+    // Allow IPv4 and IPv6
+    ip = ip.replace(/[^0-9a-fA-F:.]/g, "").substring(0, 45);
+  }
+
+  return `ip:${ip || "unknown"}`;
 }

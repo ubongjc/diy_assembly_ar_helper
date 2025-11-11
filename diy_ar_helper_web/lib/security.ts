@@ -104,11 +104,22 @@ export class CSRFProtection {
       return false;
     }
 
-    // Constant-time comparison to prevent timing attacks
-    return crypto.timingSafeEqual(
-      Buffer.from(cookieToken),
-      Buffer.from(headerToken)
-    );
+    // Check lengths match before timing-safe comparison
+    if (cookieToken.length !== headerToken.length) {
+      return false;
+    }
+
+    try {
+      // Constant-time comparison to prevent timing attacks
+      return crypto.timingSafeEqual(
+        Buffer.from(cookieToken),
+        Buffer.from(headerToken)
+      );
+    } catch (error) {
+      // Handle any unexpected errors in comparison
+      console.error("CSRF token comparison error:", error);
+      return false;
+    }
   }
 
   /**

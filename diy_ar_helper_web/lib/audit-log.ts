@@ -101,35 +101,22 @@ export class AuditLogger {
    */
   static async log(entry: AuditLogEntry): Promise<void> {
     try {
-      await prisma.$executeRaw`
-        INSERT INTO audit_logs (
-          event_type,
-          severity,
-          user_id,
-          resource_type,
-          resource_id,
-          action,
-          description,
-          metadata,
-          ip_address,
-          user_agent,
-          success,
-          timestamp
-        ) VALUES (
-          ${entry.eventType},
-          ${entry.severity},
-          ${entry.userId},
-          ${entry.resourceType},
-          ${entry.resourceId},
-          ${entry.action},
-          ${entry.description},
-          ${JSON.stringify(entry.metadata || {})},
-          ${entry.ipAddress},
-          ${entry.userAgent},
-          ${entry.success},
-          ${entry.timestamp}
-        )
-      `;
+      await prisma.auditLog.create({
+        data: {
+          eventType: entry.eventType,
+          severity: entry.severity,
+          userId: entry.userId || null,
+          resourceType: entry.resourceType || null,
+          resourceId: entry.resourceId || null,
+          action: entry.action,
+          description: entry.description || null,
+          metadata: entry.metadata || null,
+          ipAddress: entry.ipAddress || null,
+          userAgent: entry.userAgent || null,
+          success: entry.success,
+          timestamp: entry.timestamp,
+        },
+      });
 
       // For critical events, also log to Sentry
       if (entry.severity === AuditSeverity.CRITICAL) {
@@ -310,40 +297,33 @@ export class AuditLogger {
     endDate?: Date;
     limit?: number;
   }) {
-    const conditions: string[] = [];
-    const values: any[] = [];
+    const where: any = {};
 
     if (params.userId) {
-      conditions.push(`user_id = $${conditions.length + 1}`);
-      values.push(params.userId);
+      where.userId = params.userId;
     }
 
     if (params.eventType) {
-      conditions.push(`event_type = $${conditions.length + 1}`);
-      values.push(params.eventType);
+      where.eventType = params.eventType;
     }
 
-    if (params.startDate) {
-      conditions.push(`timestamp >= $${conditions.length + 1}`);
-      values.push(params.startDate);
+    // Handle date range
+    if (params.startDate || params.endDate) {
+      where.timestamp = {};
+      if (params.startDate) {
+        where.timestamp.gte = params.startDate;
+      }
+      if (params.endDate) {
+        where.timestamp.lte = params.endDate;
+      }
     }
 
-    if (params.endDate) {
-      conditions.push(`timestamp <= $${conditions.length + 1}`);
-      values.push(params.endDate);
-    }
-
-    const whereClause =
-      conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const limit = params.limit || 100;
-
-    const query = `
-      SELECT * FROM audit_logs
-      ${whereClause}
-      ORDER BY timestamp DESC
-      LIMIT $${values.length + 1}
-    `;
-
-    return await prisma.$queryRawUnsafe(query, ...values, limit);
+    return await prisma.auditLog.findMany({
+      where,
+      orderBy: {
+        timestamp: "desc",
+      },
+      take: params.limit || 100,
+    });
   }
 }

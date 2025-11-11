@@ -97,7 +97,7 @@ async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
 
   if (!userId) {
     console.error("Missing userId in subscription metadata");
-    return;
+    throw new Error("Missing userId in subscription metadata");
   }
 
   // Get subscription tier from price ID
@@ -110,33 +110,36 @@ async function handleSubscriptionCreated(subscription: Stripe.Subscription) {
     tier = "manufacturer";
   }
 
-  // Create or update subscription record
-  await prisma.subscription.upsert({
-    where: { userId },
-    create: {
-      userId,
-      stripeSubscriptionId: subscription.id,
-      tier,
-      status: subscription.status,
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
-    update: {
-      stripeSubscriptionId: subscription.id,
-      tier,
-      status: subscription.status,
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
+  // Use transaction to ensure atomicity
+  await prisma.$transaction(async (tx) => {
+    // Create or update subscription record
+    await tx.subscription.upsert({
+      where: { userId },
+      create: {
+        userId,
+        stripeSubscriptionId: subscription.id,
+        tier,
+        status: subscription.status,
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+      update: {
+        stripeSubscriptionId: subscription.id,
+        tier,
+        status: subscription.status,
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+    });
+
+    // Update user's subscription tier
+    await tx.user.update({
+      where: { id: userId },
+      data: { subscriptionTier: tier },
+    });
   });
 
-  // Update user's subscription tier
-  await prisma.user.update({
-    where: { id: userId },
-    data: { subscriptionTier: tier },
-  });
-
-  // Log audit event
+  // Log audit event (outside transaction as it's not critical)
   await AuditLogger.logPayment({
     eventType: AuditEventType.SUBSCRIPTION_CREATED,
     userId,
@@ -158,31 +161,36 @@ async function handleSubscriptionUpdated(subscription: Stripe.Subscription) {
 
   if (!userId) {
     console.error("Missing userId in subscription metadata");
-    return;
+    throw new Error("Missing userId in subscription metadata");
   }
 
   // Update subscription record
-  await prisma.subscription.update({
-    where: { userId },
-    data: {
-      status: subscription.status,
-      currentPeriodEnd: new Date(subscription.current_period_end * 1000),
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
-  });
+  try {
+    await prisma.subscription.update({
+      where: { userId },
+      data: {
+        status: subscription.status,
+        currentPeriodEnd: new Date(subscription.current_period_end * 1000),
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+    });
 
-  // Log audit event
-  await AuditLogger.logPayment({
-    eventType: AuditEventType.SUBSCRIPTION_UPDATED,
-    userId,
-    success: true,
-    description: `Subscription updated: ${subscription.status}`,
-    metadata: {
-      subscriptionId: subscription.id,
-      status: subscription.status,
-      cancelAtPeriodEnd: subscription.cancel_at_period_end,
-    },
-  });
+    // Log audit event
+    await AuditLogger.logPayment({
+      eventType: AuditEventType.SUBSCRIPTION_UPDATED,
+      userId,
+      success: true,
+      description: `Subscription updated: ${subscription.status}`,
+      metadata: {
+        subscriptionId: subscription.id,
+        status: subscription.status,
+        cancelAtPeriodEnd: subscription.cancel_at_period_end,
+      },
+    });
+  } catch (error) {
+    console.error("Failed to update subscription:", error);
+    throw error;
+  }
 }
 
 /**
