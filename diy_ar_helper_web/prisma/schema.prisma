@@ -162,3 +162,170 @@ model PartDetectionCache {
   @@index([partHash])
   @@map("part_detection_cache")
 }
+
+// Audit Logs - comprehensive security and compliance logging
+model AuditLog {
+  id                String   @id @default(cuid())
+  eventType         String   // Type of event (auth.login, payment.succeeded, etc.)
+  severity          String   // info, warning, error, critical
+  userId            String?
+  resourceType      String?  // Type of resource (manual, session, user, etc.)
+  resourceId        String?  // ID of the affected resource
+  action            String   // Action performed
+  description       String?  // Human-readable description
+  metadata          Json?    // Additional context data
+  ipAddress         String?
+  userAgent         String?
+  success           Boolean
+  timestamp         DateTime @default(now())
+
+  @@index([userId])
+  @@index([eventType])
+  @@index([timestamp])
+  @@index([severity])
+  @@map("audit_logs")
+}
+
+// API Keys - for manufacturer integrations
+model APIKey {
+  id                String   @id @default(cuid())
+  userId            String
+  name              String   // Friendly name for the key
+  keyHash           String   @unique // SHA-256 hash of the key
+  prefix            String   // First 8 chars for identification
+  scopes            Json     // Array of permitted scopes
+  rateLimit         Int      @default(1000) // Requests per hour
+  lastUsedAt        DateTime?
+  expiresAt         DateTime?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([keyHash])
+  @@index([isActive])
+  @@map("api_keys")
+}
+
+// Notifications - for email and push notifications
+model Notification {
+  id                String   @id @default(cuid())
+  userId            String
+  type              String   // email, push, in_app
+  category          String   // manual_update, subscription, system, etc.
+  title             String
+  message           String
+  data              Json?    // Additional data
+  read              Boolean  @default(false)
+  sentAt            DateTime?
+  readAt            DateTime?
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// Email Queue - for reliable email delivery
+model EmailQueue {
+  id                String   @id @default(cuid())
+  to                String
+  from              String
+  subject           String
+  html              String
+  text              String?
+  template          String?  // Template name
+  templateData      Json?    // Template variables
+  status            String   // pending, sent, failed
+  attempts          Int      @default(0)
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  error             String?
+  createdAt         DateTime @default(now())
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("email_queue")
+}
+
+// File Uploads - track uploaded files
+model FileUpload {
+  id                String   @id @default(cuid())
+  userId            String
+  filename          String
+  originalFilename  String
+  mimeType          String
+  size              Int      // Bytes
+  path              String   // R2 path
+  url               String   // Public URL
+  bucket            String   // R2 bucket name
+  checksum          String   // SHA-256 checksum
+  isEncrypted       Boolean  @default(false)
+  metadata          Json?    // Additional metadata (dimensions, duration, etc.)
+  createdAt         DateTime @default(now())
+
+  @@index([userId])
+  @@index([checksum])
+  @@map("file_uploads")
+}
+
+// Manual Reviews - user reviews for manuals
+model ManualReview {
+  id                String   @id @default(cuid())
+  manualId          String
+  userId            String
+  rating            Int      // 1-5
+  title             String?
+  comment           String?
+  helpful           Int      @default(0) // Helpful votes
+  notHelpful        Int      @default(0) // Not helpful votes
+  isVerified        Boolean  @default(false) // Verified purchase/completion
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([manualId])
+  @@index([userId])
+  @@index([rating])
+  @@map("manual_reviews")
+}
+
+// Favorites/Bookmarks - user saved manuals
+model Favorite {
+  id                String   @id @default(cuid())
+  userId            String
+  manualId          String
+  createdAt         DateTime @default(now())
+
+  @@unique([userId, manualId])
+  @@index([userId])
+  @@index([manualId])
+  @@map("favorites")
+}
+
+// Search Analytics - track searches for improvement
+model SearchAnalytics {
+  id                String   @id @default(cuid())
+  userId            String?
+  query             String
+  resultsCount      Int
+  selectedResultId  String?  // Manual ID if clicked
+  createdAt         DateTime @default(now())
+
+  @@index([query])
+  @@index([createdAt])
+  @@map("search_analytics")
+}
+
+// Feature Flags - for gradual rollouts
+model FeatureFlag {
+  id                String   @id @default(cuid())
+  name              String   @unique
+  description       String?
+  enabled           Boolean  @default(false)
+  rolloutPercentage Int      @default(0) // 0-100
+  conditions        Json?    // Conditional logic
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@map("feature_flags")
+}
