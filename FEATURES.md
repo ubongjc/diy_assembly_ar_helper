@@ -1,7 +1,7 @@
 # DIY Assembly AR Helper - Features & Implementation Guide
 
 **Last Updated:** 2025-11-11
-**Version:** 1.0.2 (Production Security + Bug Fixes)
+**Version:** 1.1.0 (Core Production Features)
 **Branch:** `claude/diy-ar-helper-scaffold-011CV1QyogoYKfTk8ZsLAgDz`
 
 ---
@@ -398,11 +398,373 @@ Sync user data from Clerk.
 
 **Security**: Svix signature verification
 
+#### Manual Search
+```
+GET /api/manual/search
+```
+Search manuals with filters and pagination.
+
+**Query Parameters**:
+- `query` - Full-text search (optional)
+- `category` - Filter by category (optional)
+- `difficulty` - Filter by difficulty: easy/medium/hard (optional)
+- `brand` - Filter by brand (optional)
+- `isPublic` - Filter by visibility (optional)
+- `isPro` - Filter by Pro requirement (optional)
+- `page` - Page number (default: 1)
+- `limit` - Results per page (default: 20, max: 100)
+- `sortBy` - Sort field: createdAt/updatedAt/title/estimatedTime (default: createdAt)
+- `sortOrder` - Sort order: asc/desc (default: desc)
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": [...],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "totalCount": 150,
+    "totalPages": 8,
+    "hasNextPage": true,
+    "hasPrevPage": false
+  },
+  "filters": {...}
+}
+```
+
+**Access Control**: Public manuals for guests, all accessible + Pro for subscribers
+
+**Features**:
+- Full-text search across multiple fields
+- Subscription-aware filtering
+- Automatic search analytics
+- Faceted filtering
+
+```
+OPTIONS /api/manual/search
+```
+Get available filter options (categories, brands, stats).
+
+#### File Upload
+```
+POST /api/upload
+```
+Upload files to Cloudflare R2 storage.
+
+**Request** (multipart/form-data):
+- `file` - File to upload (required)
+- `manualId` - Associated manual ID (optional)
+- `encryptedKey` - Client-side encryption key (optional)
+
+**Response**:
+```json
+{
+  "success": true,
+  "file": {
+    "id": "clx...",
+    "filename": "assembly_step_1.jpg",
+    "url": "https://r2.../uploads/...",
+    "size": 1024000,
+    "mimeType": "image/jpeg",
+    "hash": "abc123...",
+    "createdAt": "2025-11-11T00:00:00.000Z"
+  }
+}
+```
+
+**Limits**:
+- Max file size: 50MB
+- Free: 10 uploads/month
+- Pro: 100 uploads/month
+- Manufacturer: 1000 uploads/month
+- Rate limit: 3 uploads per 5 minutes (expensive tier)
+
+**Allowed Types**: Images (JPEG, PNG, WebP, GIF), PDF, 3D models (GLB, GLTF, USDZ)
+
+```
+GET /api/upload
+```
+Get user's upload history with usage stats.
+
+```
+DELETE /api/upload?id={fileId}
+```
+Delete uploaded file (owner only).
+
+#### Session Management
+```
+POST /api/session
+```
+Create new assembly session or resume existing.
+
+**Request**:
+```json
+{
+  "manualId": "clx...",
+  "deviceType": "ios" | "web"
+}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "session": {
+    "id": "clx...",
+    "userId": "user_...",
+    "manualId": "clx...",
+    "currentStep": 0,
+    "stepStates": ["pending", "pending", ...],
+    "status": "IN_PROGRESS",
+    "deviceType": "ios",
+    "arData": {},
+    "telemetry": {...}
+  },
+  "resumed": false
+}
+```
+
+```
+GET /api/session
+```
+Get user's sessions with filtering.
+
+**Query Parameters**:
+- `status` - Filter by status: IN_PROGRESS/COMPLETED/PAUSED/ABANDONED
+- `page` - Page number
+- `limit` - Results per page
+
+```
+GET /api/session/{id}
+```
+Get session details with full manual data.
+
+```
+PATCH /api/session/{id}
+```
+Update session progress.
+
+**Request**:
+```json
+{
+  "currentStep": 2,
+  "stepStates": ["completed", "completed", "in_progress", ...],
+  "status": "IN_PROGRESS",
+  "arData": {...},
+  "telemetry": {...}
+}
+```
+
+```
+DELETE /api/session/{id}
+```
+Delete session (owner only).
+
+#### Favorites
+```
+POST /api/manual/{id}/favorite
+```
+Add manual to favorites.
+
+```
+DELETE /api/manual/{id}/favorite
+```
+Remove manual from favorites.
+
+```
+GET /api/manual/{id}/favorite
+```
+Check if manual is favorited.
+
+**Response**:
+```json
+{
+  "isFavorited": true,
+  "favorite": {
+    "id": "clx...",
+    "userId": "user_...",
+    "manualId": "clx...",
+    "createdAt": "2025-11-11T00:00:00.000Z"
+  }
+}
+```
+
+#### Reviews
+```
+POST /api/manual/{id}/review
+```
+Create review for manual.
+
+**Request**:
+```json
+{
+  "rating": 5,
+  "comment": "Great manual! Easy to follow."
+}
+```
+
+**Validation**:
+- Rating: 1-5 stars (required)
+- Comment: 1-1000 characters (required)
+- Cannot review own manuals
+- One review per user per manual
+
+```
+GET /api/manual/{id}/review
+```
+Get reviews for manual with stats.
+
+**Response**:
+```json
+{
+  "success": true,
+  "reviews": [...],
+  "pagination": {...},
+  "stats": {
+    "averageRating": 4.5,
+    "totalReviews": 42,
+    "distribution": {
+      "1": 2,
+      "2": 3,
+      "3": 5,
+      "4": 12,
+      "5": 20
+    }
+  }
+}
+```
+
+```
+PATCH /api/manual/{id}/review
+```
+Update review (vote helpful, report, delete).
+
+**Request**:
+```json
+{
+  "reviewId": "clx...",
+  "action": "helpful" | "report" | "delete"
+}
+```
+
+#### Notifications
+```
+GET /api/notifications
+```
+Get user's notifications.
+
+**Query Parameters**:
+- `unreadOnly` - Show only unread (boolean)
+- `type` - Filter by type: payment/security/feature/manual/session/review/admin
+- `page` - Page number
+- `limit` - Results per page
+
+**Response**:
+```json
+{
+  "success": true,
+  "notifications": [...],
+  "pagination": {...},
+  "unreadCount": 5
+}
+```
+
+```
+PATCH /api/notifications/{id}
+```
+Mark notification as read.
+
+**Special**: Use `id=all` to mark all as read.
+
+```
+DELETE /api/notifications/{id}
+```
+Delete notification (owner only).
+
+```
+POST /api/notifications
+```
+Create notification (admin only).
+
+#### API Keys (Manufacturers)
+```
+POST /api/api-keys
+```
+Create new API key.
+
+**Request**:
+```json
+{
+  "name": "Production API Key",
+  "scopes": ["manual:read", "manual:write", "session:read"],
+  "rateLimit": 1000,
+  "expiresAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "message": "API key created successfully. Store it securely - you won't be able to see it again.",
+  "apiKey": "diy_abc123...xyz",
+  "key": {
+    "id": "clx...",
+    "name": "Production API Key",
+    "prefix": "diy_abc123...",
+    "scopes": ["manual:read", "manual:write", "session:read"],
+    "rateLimit": 1000,
+    "expiresAt": "2026-01-01T00:00:00.000Z",
+    "createdAt": "2025-11-11T00:00:00.000Z"
+  }
+}
+```
+
+**Scopes**:
+- `manual:read` - Read manuals
+- `manual:write` - Create/update manuals
+- `manual:delete` - Delete manuals
+- `session:read` - Read sessions
+- `session:write` - Create/update sessions
+- `analytics:read` - Read analytics
+
+**Limits**:
+- 5 keys per manufacturer
+- Only Manufacturer tier can create keys
+
+```
+GET /api/api-keys
+```
+List user's API keys.
+
+```
+PATCH /api/api-keys/{id}
+```
+Update API key (activate/deactivate, rename).
+
+```
+DELETE /api/api-keys/{id}
+```
+Revoke API key permanently.
+
 **Files**:
 - `diy_ar_helper_web/app/api/health/route.ts`
 - `diy_ar_helper_web/app/api/manual/ingest/route.ts`
 - `diy_ar_helper_web/app/api/manual/[id]/route.ts`
+- `diy_ar_helper_web/app/api/manual/search/route.ts`
+- `diy_ar_helper_web/app/api/manual/[id]/favorite/route.ts`
+- `diy_ar_helper_web/app/api/manual/[id]/review/route.ts`
+- `diy_ar_helper_web/app/api/upload/route.ts`
+- `diy_ar_helper_web/app/api/session/route.ts`
+- `diy_ar_helper_web/app/api/session/[id]/route.ts`
+- `diy_ar_helper_web/app/api/notifications/route.ts`
+- `diy_ar_helper_web/app/api/notifications/[id]/route.ts`
+- `diy_ar_helper_web/app/api/api-keys/route.ts`
+- `diy_ar_helper_web/app/api/api-keys/[id]/route.ts`
 - `diy_ar_helper_web/app/api/webhook/clerk/route.ts`
+- `diy_ar_helper_web/lib/r2.ts`
+- `diy_ar_helper_web/lib/notifications.ts`
 
 ### ✅ Client-Side Encryption
 
@@ -929,17 +1291,24 @@ npx prisma migrate deploy
   - [ ] Subscription sync
   - [ ] Restore purchases
 
-### 🔜 In Progress
-
 #### Core Features
-- [ ] Manual search and filtering
-- [ ] File upload handling
-- [ ] Cloudflare R2 integration
+- [x] Manual search and filtering (v1.1.0)
+- [x] File upload handling (v1.1.0)
+- [x] Cloudflare R2 integration (v1.1.0)
+- [x] Session progress tracking (v1.1.0)
+- [x] Notification system (v1.1.0)
 - [ ] Image optimization
-- [ ] Session progress tracking
-- [ ] Notification system
 - [ ] Email templates
 - [ ] Push notifications (iOS)
+
+#### Social Features
+- [x] Favorites/bookmarks (v1.1.0)
+- [x] User reviews (v1.1.0)
+- [x] Ratings system (v1.1.0)
+- [ ] Manual sharing
+- [ ] Community manuals
+
+### 🔜 In Progress
 
 #### Admin & Analytics
 - [ ] Admin dashboard
@@ -981,6 +1350,133 @@ npx prisma migrate deploy
 ---
 
 ## Changelog
+
+### Version 1.1.0 - Core Production Features (2025-11-11)
+
+#### 🚀 Features Added
+
+**Manual Search API**
+- Full-text search across title, brand, model, category, description
+- Multi-filter support: category, difficulty, brand, visibility, Pro flag
+- Pagination with comprehensive metadata (hasNext/Prev, totalPages)
+- Sorting by multiple fields with asc/desc ordering
+- Subscription-aware access control (public, private, Pro content)
+- Automatic search analytics tracking
+- Filter options endpoint for faceted search (categories, brands, stats)
+- **Files**: `app/api/manual/search/route.ts`
+
+**File Upload System**
+- Cloudflare R2 S3-compatible storage integration
+- Multi-format support: images (JPEG, PNG, WebP, GIF), PDF, 3D models (GLB, GLTF, USDZ)
+- File validation: size (50MB max), MIME type, extension
+- SHA-256 hash-based deduplication and security
+- Subscription-based upload limits:
+  - Free: 10 uploads/month
+  - Pro: 100 uploads/month
+  - Manufacturer: 1000 uploads/month
+- Expensive rate limiting (3 uploads per 5 minutes)
+- Client-side encryption key support
+- Upload history with usage stats
+- File deletion with ownership verification
+- Audit logging for all operations
+- **Files**: `app/api/upload/route.ts`, `lib/r2.ts`
+
+**Session Management**
+- Create new assembly sessions with auto-resume
+- Track progress through manual steps
+- Update current step, step states (pending/in_progress/completed/skipped)
+- Session status management (IN_PROGRESS/COMPLETED/PAUSED/ABANDONED)
+- AR data and telemetry tracking
+- Session history with pagination and filtering
+- Complete session with duration calculation
+- Abandon tracking for analytics
+- Device type tracking (iOS/web)
+- Full manual data inclusion
+- Audit logging for completion/abandonment
+- **Files**: `app/api/session/route.ts`, `app/api/session/[id]/route.ts`
+
+**Social Features**
+- **Favorites**:
+  - Add/remove manuals from favorites
+  - Check favorite status
+  - Unique constraint per user+manual
+  - Count tracking in search results
+  - **Files**: `app/api/manual/[id]/favorite/route.ts`
+
+- **Reviews**:
+  - Create reviews with 1-5 star ratings
+  - Comment validation (1-1000 chars, XSS sanitization)
+  - Prevent self-reviews
+  - One review per user per manual
+  - Get reviews with pagination
+  - Calculate average rating and distribution
+  - Vote helpful on reviews
+  - Report for moderation
+  - Delete own reviews or admin deletion
+  - Sort by helpful votes + recency
+  - **Files**: `app/api/manual/[id]/review/route.ts`
+
+**Notification System**
+- Get user notifications with filters (unread, type)
+- Mark individual or all notifications as read
+- Delete notifications
+- Notification types: payment, security, feature, manual, session, review, admin
+- Unread count tracking
+- Pagination support
+- Notification helper library with templates
+- Bulk notification support
+- Automatic cleanup of old read notifications
+- **Files**: `app/api/notifications/route.ts`, `app/api/notifications/[id]/route.ts`, `lib/notifications.ts`
+
+**API Key Management (Manufacturers)**
+- Generate secure API keys for programmatic access
+- SHA-256 hash storage (keys never stored in plaintext)
+- One-time key display on creation
+- Scope-based permissions system:
+  - `manual:read/write/delete`
+  - `session:read/write`
+  - `analytics:read`
+- Configurable rate limiting per key
+- Key expiration support
+- 5 key limit per manufacturer
+- List, activate, deactivate, revoke operations
+- Key prefix display for identification
+- Last used timestamp tracking
+- Audit logging for all key lifecycle events
+- Manufacturer tier requirement
+- **Files**: `app/api/api-keys/route.ts`, `app/api/api-keys/[id]/route.ts`
+
+#### 🔒 Security Features
+
+- Subscription-based access control across all features
+- Upload limits enforced per tier
+- Expensive rate limiting on resource-intensive operations
+- Input validation with Zod schemas
+- XSS prevention in user-generated content
+- Ownership verification on all mutations
+- Audit logging for sensitive operations
+- API key secure generation and storage
+- Search analytics for abuse detection
+
+#### 📊 Performance & Scalability
+
+- Pagination on all list endpoints (max 100 items)
+- Efficient database queries with proper indexing
+- Parallel aggregation queries for statistics
+- Deduplication via SHA-256 hashing
+- Resume support for interrupted sessions
+
+#### 📝 Documentation
+
+- ✅ Complete API reference with examples
+- ✅ Request/response schemas
+- ✅ Access control documentation
+- ✅ Rate limit specifications
+- ✅ Error handling patterns
+
+**Total Lines Added**: ~3,020 lines across 12 files
+
+---
 
 ### Version 1.0.2 - Critical Bug Fixes (2025-11-11)
 
