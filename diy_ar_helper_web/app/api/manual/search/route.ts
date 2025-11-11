@@ -129,7 +129,14 @@ export async function GET(req: NextRequest) {
 
       // Merge access control with existing where clause
       if (Object.keys(where).length > 0) {
-        where.AND = [accessFilter];
+        // Wrap existing filters and access control properly
+        const existingFilters = { ...where };
+        where = {
+          AND: [
+            existingFilters,
+            accessFilter,
+          ],
+        };
       } else {
         Object.assign(where, accessFilter);
       }

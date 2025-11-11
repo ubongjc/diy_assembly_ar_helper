@@ -117,7 +117,13 @@ export async function POST(req: NextRequest) {
     }
 
     // Initialize step states
-    const steps = (manual.steps as any[]) || [];
+    const steps = Array.isArray(manual.steps) ? manual.steps : [];
+    if (steps.length === 0) {
+      return NextResponse.json(
+        { error: "Manual has no steps" },
+        { status: 400 }
+      );
+    }
     const stepStates = steps.map(() => "pending");
 
     // Create new session

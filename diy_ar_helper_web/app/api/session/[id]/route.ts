@@ -156,46 +156,95 @@ export async function PATCH(
     const body = await req.json();
     const updates = updateSessionSchema.parse(body);
 
+    // Get manual to validate step bounds
+    const manual = await prisma.manual.findUnique({
+      where: { id: existingSession.manualId },
+      select: { steps: true },
+    });
+
+    if (!manual) {
+      return NextResponse.json(
+        { error: "Manual not found" },
+        { status: 404 }
+      );
+    }
+
+    const manualSteps = Array.isArray(manual.steps) ? manual.steps : [];
+    const maxStep = manualSteps.length - 1;
+
     // Prepare update data
     const updateData: any = {};
 
     if (updates.currentStep !== undefined) {
+      // Validate currentStep is within bounds
+      if (updates.currentStep < 0 || updates.currentStep > maxStep) {
+        return NextResponse.json(
+          {
+            error: "Invalid currentStep",
+            currentStep: updates.currentStep,
+            maxStep,
+          },
+          { status: 400 }
+        );
+      }
       updateData.currentStep = updates.currentStep;
     }
 
     if (updates.stepStates !== undefined) {
+      // Validate stepStates length matches manual steps
+      if (updates.stepStates.length !== manualSteps.length) {
+        return NextResponse.json(
+          {
+            error: "stepStates length must match manual steps",
+            provided: updates.stepStates.length,
+            expected: manualSteps.length,
+          },
+          { status: 400 }
+        );
+      }
       updateData.stepStates = updates.stepStates;
     }
 
+    // Start with existing telemetry or empty object
+    let telemetry = { ...(existingSession.telemetry as any) } || {};
+
+    // Merge user-provided telemetry first
+    if (updates.telemetry !== undefined) {
+      telemetry = {
+        ...telemetry,
+        ...updates.telemetry,
+      };
+    }
+
+    // Then apply status-based telemetry updates (should override user data)
     if (updates.status !== undefined) {
       updateData.status = updates.status;
 
-      // Update telemetry based on status
-      const telemetry = (existingSession.telemetry as any) || {};
       if (updates.status === "COMPLETED") {
         telemetry.completedAt = new Date().toISOString();
-        telemetry.duration = Date.now() - new Date(telemetry.startedAt).getTime();
+        // Only calculate duration if startedAt exists
+        if (telemetry.startedAt) {
+          try {
+            telemetry.duration = Date.now() - new Date(telemetry.startedAt).getTime();
+          } catch (error) {
+            console.error("Failed to calculate duration:", error);
+          }
+        }
       } else if (updates.status === "ABANDONED") {
         telemetry.abandonedAt = new Date().toISOString();
       } else if (updates.status === "PAUSED") {
         telemetry.pausedAt = new Date().toISOString();
       }
-      updateData.telemetry = telemetry;
     }
+
+    // Set final telemetry
+    updateData.telemetry = telemetry;
 
     if (updates.arData !== undefined) {
       // Merge AR data with existing
       updateData.arData = {
         ...(existingSession.arData as any),
         ...updates.arData,
-      };
-    }
-
-    if (updates.telemetry !== undefined) {
-      // Merge telemetry with existing
-      updateData.telemetry = {
-        ...(existingSession.telemetry as any),
-        ...updates.telemetry,
       };
     }
 

@@ -279,14 +279,30 @@ model ManualReview {
   comment           String?
   helpful           Int      @default(0) // Helpful votes
   notHelpful        Int      @default(0) // Not helpful votes
+  reported          Boolean  @default(false) // Reported for moderation
   isVerified        Boolean  @default(false) // Verified purchase/completion
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
+  @@unique([userId, manualId])
   @@index([manualId])
   @@index([userId])
   @@index([rating])
+  @@index([reported])
   @@map("manual_reviews")
+}
+
+// Review Helpful Votes - track who voted helpful to prevent spam
+model ReviewHelpfulVote {
+  id                String   @id @default(cuid())
+  reviewId          String
+  userId            String
+  createdAt         DateTime @default(now())
+
+  @@unique([reviewId, userId])
+  @@index([reviewId])
+  @@index([userId])
+  @@map("review_helpful_votes")
 }
 
 // Favorites/Bookmarks - user saved manuals

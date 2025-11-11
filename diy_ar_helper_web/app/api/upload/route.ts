@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { prisma } from "@/lib/prisma";
-import { uploadToR2, isValidFileExtension, sanitizeFilename, UPLOAD_CONFIG } from "@/lib/r2";
+import { uploadToR2, deleteFromR2, isValidFileExtension, sanitizeFilename, UPLOAD_CONFIG } from "@/lib/r2";
 import { AuditLogger, AuditEventType } from "@/lib/audit-log";
 import { checkRateLimit, getRateLimitIdentifier, expensiveRatelimit } from "@/lib/rate-limit";
 
@@ -376,8 +376,14 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    // Delete from R2 (we'll import this function)
-    // await deleteFromR2(fileUpload.key);
+    // Delete from R2 first
+    try {
+      await deleteFromR2(fileUpload.key);
+    } catch (error) {
+      console.error("Failed to delete from R2:", error);
+      // Continue with database deletion even if R2 deletion fails
+      // R2 deletion failure shouldn't block the user
+    }
 
     // Delete from database
     await prisma.fileUpload.delete({

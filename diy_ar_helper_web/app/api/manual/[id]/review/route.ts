@@ -283,14 +283,51 @@ export async function PATCH(
 
     // Handle different actions
     if (action === "helpful") {
-      // Increment helpful count
-      const updated = await prisma.manualReview.update({
-        where: { id: reviewId },
-        data: {
-          helpful: {
-            increment: 1,
+      // Check if user already voted
+      const existingVote = await prisma.reviewHelpfulVote.findUnique({
+        where: {
+          reviewId_userId: {
+            reviewId,
+            userId: user.id,
           },
         },
+      });
+
+      if (existingVote) {
+        return NextResponse.json(
+          { error: "You already voted this review as helpful" },
+          { status: 400 }
+        );
+      }
+
+      // Prevent voting on own review
+      if (review.userId === user.id) {
+        return NextResponse.json(
+          { error: "Cannot vote helpful on your own review" },
+          { status: 400 }
+        );
+      }
+
+      // Create vote and increment helpful count atomically
+      await prisma.$transaction([
+        prisma.reviewHelpfulVote.create({
+          data: {
+            reviewId,
+            userId: user.id,
+          },
+        }),
+        prisma.manualReview.update({
+          where: { id: reviewId },
+          data: {
+            helpful: {
+              increment: 1,
+            },
+          },
+        }),
+      ]);
+
+      const updated = await prisma.manualReview.findUnique({
+        where: { id: reviewId },
       });
 
       return NextResponse.json({
